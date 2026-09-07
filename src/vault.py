@@ -17,9 +17,7 @@ class VaultClient:
         self.token = token or os.getenv("VAULT_TOKEN")
 
         if not self.token:
-            raise RuntimeError(
-                "VAULT_TOKEN is not set"
-            )
+            raise RuntimeError("VAULT_TOKEN is not set")
 
         self.client = hvac.Client(
             url=self.url,
@@ -27,12 +25,11 @@ class VaultClient:
         )
 
         if not self.client.is_authenticated():
-            raise RuntimeError(
-                "Vault authentication failed"
-            )
+            raise RuntimeError("Vault authentication failed")
 
     def get_secrets(self, path: str) -> dict:
         response = self.client.secrets.kv.v2.read_secret_version(
+            mount_point="secret",
             path=path,
         )
 

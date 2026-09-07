@@ -1,11 +1,91 @@
 services:
+  vault:
+    image: hashicorp/vault:1.20
+    container_name: mlops-vault
+    ports: ["8200:8200"]
+    cap_add: [IPC_LOCK]
+    environment:
+      VAULT_ADDR: http://127.0.0.1:8200
+      VAULT_TOKEN: root
+    volumes:
+      - ./vault/seed.sh:/seed.sh:ro
+    command: >-
+      sh -c "vault server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200 &
+            sleep 3 && sh /seed.sh && wait"
+    healthcheck:
+      test: ["CMD-SHELL", "vault kv get -mount=secret mlops-app >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      retries: 20
+      start_period: 10s
 
-  api:
+  cassandra:
+    image: cassandra:5.0
+    container_name: cassandra-dev
+
+    ports:
+      - "${CASSANDRA_PORT}:9042"
+
+    environment:
+      CASSANDRA_CLUSTER_NAME: dev-cluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      MAX_HEAP_SIZE: 1G
+      HEAP_NEWSIZE: 256M
+      CASSANDRA_BOOTSTRAP_USER: cassandra
+      CASSANDRA_BOOTSTRAP_PASSWORD: cassandra
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+
+    command:
+      - bash
+      - -c
+      - >-
+        sed -i
+        -e 's/^authenticator:.*/authenticator: PasswordAuthenticator/'
+        -e 's/^authorizer:.*/authorizer: CassandraAuthorizer/'
+        /etc/cassandra/cassandra.yaml
+        && exec /usr/local/bin/docker-entrypoint.sh cassandra -f
+
+    depends_on:
+      vault:
+        condition: service_healthy
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+      - ./vault/load_secrets.py:/load_secrets.py:ro
+    healthcheck:
+      test: ["CMD-SHELL", "eval \"$$(python3 /load_secrets.py)\" && cqlsh -u \"$$CASSANDRA_BOOTSTRAP_USER\" -p \"$$CASSANDRA_BOOTSTRAP_PASSWORD\" -e 'describe cluster' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      retries: 30
+      start_period: 60s
+
+  cassandra-init:
+    image: cassandra:5.0
     depends_on:
       cassandra:
         condition: service_healthy
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      VAULT_SECRET_PATH: mlops-app
+    volumes:
+      - ./src/db/schema.cql:/schema.cql:ro
+      - ./src/db/init_db.sh:/init_db.sh:ro
+      - ./vault/load_secrets.py:/load_secrets.py:ro
+    command: ["bash", "/init_db.sh"]
+
+  api:
+    depends_on:
+      vault:
+        condition: service_started
+
+      cassandra:
+        condition: service_healthy
+
       cassandra-init:
         condition: service_completed_successfully
+
     build:
       context: .
       dockerfile: Dockerfile
@@ -23,67 +103,12 @@ services:
     env_file:
       - .env
 
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      VAULT_SECRET_PATH: mlops-app
+
     restart: unless-stopped
-
-  vault:
-    image: hashicorp/vault:1.20
-    container_name: mlops-vault
-    ports:
-      - "8200:8200"
-    environment:
-      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID}
-      VAULT_DEV_LISTEN_ADDRESS: ${VAULT_DEV_LISTEN_ADDRESS}
-    cap_add:
-      - IPC_LOCK
-    command: vault server -dev
-
-  cassandra:
-    image: cassandra:5.0
-    container_name: cassandra-dev
-    ports: [ "${CASSANDRA_PORT}:9042" ]
-
-    environment:
-      CASSANDRA_CLUSTER_NAME: dev-cluster
-      CASSANDRA_DC: datacenter1
-      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
-      MAX_HEAP_SIZE: 1G
-      HEAP_NEWSIZE: 256M
-      CASSANDRA_BOOTSTRAP_USER: ${CASSANDRA_BOOTSTRAP_USER}
-      CASSANDRA_BOOTSTRAP_PASSWORD: ${CASSANDRA_BOOTSTRAP_PASSWORD}
-
-    command:
-      - bash
-      - -c
-      - >-
-        sed -i
-        -e 's/^authenticator:.*/authenticator: PasswordAuthenticator/'
-        -e 's/^authorizer:.*/authorizer: CassandraAuthorizer/'
-        /etc/cassandra/cassandra.yaml
-        && exec /usr/local/bin/docker-entrypoint.sh cassandra -f
-
-    volumes: [ cassandra-data:/var/lib/cassandra ]
-
-    healthcheck:
-      test: [ "CMD-SHELL", "cqlsh -u \"$$CASSANDRA_BOOTSTRAP_USER\" -p \"$$CASSANDRA_BOOTSTRAP_PASSWORD\" -e 'describe cluster' >/dev/null 2>&1 || exit 1" ]
-      interval: 10s
-      retries: 30
-      start_period: 60s
-
-  cassandra-init:
-    image: cassandra:5.0
-    container_name: cassandra-init
-    depends_on:
-      cassandra:
-        condition: service_healthy
-
-    env_file:
-      - .env
-
-    volumes:
-      - ./src/db/schema.cql:/schema.cql:ro
-      - ./src/db/init_db.sh:/init_db.sh:ro
-
-    command: [ "bash", "/init_db.sh" ]
 
 volumes:
   cassandra-data:
