@@ -33,3 +33,6 @@ vault/config/
 # venv
 .mlops3_venv/
 .DS_Store
+
+# secrets
+vault/seed.sh

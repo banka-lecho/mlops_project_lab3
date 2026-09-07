@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from vault import VaultClient
+from src.vault import VaultClient
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_FILE = ROOT / "config.ini"
@@ -15,12 +15,12 @@ load_dotenv(ROOT / ".env", override=False)
 
 def load_vault_secrets() -> dict:
     client = VaultClient()
+    path = os.getenv("VAULT_SECRET_PATH", "mlops-app")
 
-    return client.get_secrets(path="mlops-project")
+    return client.get_secrets(path=path)
 
 
 vault_secrets = load_vault_secrets()
-print("Vault secrets loaded:", vault_secrets["CASSANDRA_HOSTS"])
 
 
 class MissingSettingError(RuntimeError):
@@ -55,13 +55,13 @@ class CassandraSettings:
 
 
 def cassandra_settings() -> CassandraSettings:
-    """Настройки подключения к БД из переменных окружения."""
+    """Настройки подключения к БД из секретов Vault."""
 
-    hosts = vault_secrets.get("CASSANDRA_HOSTS", os.getenv("CASSANDRA_HOSTS"))
-    port = vault_secrets.get("CASSANDRA_PORT", int(os.getenv("CASSANDRA_PORT")))
-    keyspace = vault_secrets.get("CASSANDRA_KEYSPACE", os.getenv("CASSANDRA_KEYSPACE"))
-    username = vault_secrets.get("CASSANDRA_USER", os.getenv("CASSANDRA_USER"))
-    password = vault_secrets.get("CASSANDRA_PASSWORD", os.getenv("CASSANDRA_PASSWORD"))
+    hosts = vault_secrets["CASSANDRA_HOSTS"].split(",")
+    port = int(vault_secrets["CASSANDRA_PORT"])
+    keyspace = vault_secrets["CASSANDRA_KEYSPACE"]
+    username = vault_secrets["CASSANDRA_USER"]
+    password = vault_secrets["CASSANDRA_PASSWORD"]
 
     return CassandraSettings(
         hosts=hosts,

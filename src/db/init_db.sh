@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+eval "$(python3 /load_secrets.py)"
+
 : "${CASSANDRA_HOSTS:?Не задан CASSANDRA_HOSTS}"
 : "${CASSANDRA_KEYSPACE:?Не задан CASSANDRA_KEYSPACE}"
 : "${CASSANDRA_USER:?Не задан CASSANDRA_USER}"
