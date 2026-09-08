@@ -35,6 +35,7 @@ jobs:
           CASSANDRA_PASSWORD: ${{ secrets.CASSANDRA_PASSWORD }}
         run: |
           cp .env.example .env
+          cp vault/vault.env.example vault/vault.env
           [ -n "$API_IMAGE" ] && echo "API_IMAGE=$API_IMAGE" >> .env
           cat > vault/seed.sh <<'SEED'
           export VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=root
@@ -63,6 +64,7 @@ jobs:
         run: |
           if [ -n "$API_IMAGE" ]; then
             docker pull "$API_IMAGE"
+            docker compose build vault
             docker compose up -d --no-build
           else
             docker compose up -d --build

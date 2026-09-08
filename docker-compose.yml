@@ -1,17 +1,15 @@
 services:
   vault:
-    image: hashicorp/vault:1.20
+    build:
+      context: ./vault
+      dockerfile: Dockerfile
+    image: mlops-vault:local
     container_name: mlops-vault
     ports: ["8200:8200"]
     cap_add: [IPC_LOCK]
     environment:
       VAULT_ADDR: http://127.0.0.1:8200
       VAULT_TOKEN: root
-    volumes:
-      - ./vault/seed.sh:/seed.sh:ro
-    command: >-
-      sh -c "vault server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200 &
-            sleep 3 && sh /seed.sh && wait"
     healthcheck:
       test: ["CMD-SHELL", "vault kv get -mount=secret mlops-app >/dev/null 2>&1 || exit 1"]
       interval: 5s
@@ -31,10 +29,9 @@ services:
       CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
       MAX_HEAP_SIZE: 1G
       HEAP_NEWSIZE: 256M
-      CASSANDRA_BOOTSTRAP_USER: cassandra
-      CASSANDRA_BOOTSTRAP_PASSWORD: cassandra
-      VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: root
+
+    env_file:
+      - ./vault/vault.env
 
     command:
       - bash
@@ -66,9 +63,9 @@ services:
       vault:
         condition: service_healthy
     environment:
-      VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: root
       VAULT_SECRET_PATH: mlops-app
+    env_file:
+      - ./vault/vault.env
     volumes:
       - ./src/db/schema.cql:/schema.cql:ro
       - ./src/db/init_db.sh:/init_db.sh:ro
@@ -90,7 +87,6 @@ services:
       context: .
       dockerfile: Dockerfile
 
-    # Локально собирается из Dockerfile; в CD подставляется образ с DockerHub
     image: ${API_IMAGE:-emotion-prediction-api:local}
 
     container_name: emotion-prediction-api
@@ -105,10 +101,9 @@ services:
 
     env_file:
       - .env
+      - ./vault/vault.env
 
     environment:
-      VAULT_ADDR: http://vault:8200
-      VAULT_TOKEN: root
       VAULT_SECRET_PATH: mlops-app
 
     restart: unless-stopped
