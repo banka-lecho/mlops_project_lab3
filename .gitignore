@@ -26,6 +26,7 @@ requirements-dev.txt
 
 .env
 .env.*
+!.env.example
 *.secret
 vault/data/
 vault/config/

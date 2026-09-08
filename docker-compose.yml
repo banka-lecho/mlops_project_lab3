@@ -23,7 +23,7 @@ services:
     container_name: cassandra-dev
 
     ports:
-      - "${CASSANDRA_PORT}:9042"
+      - "9042:9042"
 
     environment:
       CASSANDRA_CLUSTER_NAME: dev-cluster
@@ -89,6 +89,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+
+    # Локально собирается из Dockerfile; в CD подставляется образ с DockerHub
+    image: ${API_IMAGE:-emotion-prediction-api:local}
 
     container_name: emotion-prediction-api
 
