@@ -1,28 +1,31 @@
 name: CD
 
 on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: "Тег образа emotion-api на DockerHub (пусто — собрать локально из Dockerfile)"
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Тег образа emotion-api на DockerHub"
+        description: "Тег образа emotion-api на DockerHub (пусто — собрать локально из Dockerfile)"
+        type: string
+        required: false
         default: ""
-  workflow_run:                 
-    workflows: ["CI"]
-    types: [completed]
+  schedule:
+    - cron: "0 3 * * *"          # ежедневно, 03:00 UTC — прогон против свежесобранного стека
 
 jobs:
   functional:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: >-
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
     env:
       API_IMAGE: ${{ inputs.image_tag && format('{0}/emotion-api:{1}', secrets.DOCKERHUB_USERNAME, inputs.image_tag) || '' }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -36,7 +39,7 @@ jobs:
         run: |
           cp .env.example .env
           cp vault/vault.env.example vault/vault.env
-          [ -n "$API_IMAGE" ] && echo "API_IMAGE=$API_IMAGE" >> .env
+          if [ -n "$API_IMAGE" ]; then echo "API_IMAGE=$API_IMAGE" >> .env; fi
           cat > vault/seed.sh <<'SEED'
           export VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=root
           vault kv put secret/mlops-app \
