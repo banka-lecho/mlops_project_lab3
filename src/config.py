@@ -1,6 +1,7 @@
 import configparser
 import os
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,14 +14,14 @@ CONFIG_FILE = ROOT / "config.ini"
 load_dotenv(ROOT / ".env", override=False)
 
 
+@lru_cache(maxsize=1)
 def load_vault_secrets() -> dict:
+    """Секреты из Vault. Ленивая загрузка: только при первом обращении
+    к БД, а не при импорте модуля (иначе юнит-тесты требуют Vault)."""
     client = VaultClient()
     path = os.getenv("VAULT_SECRET_PATH", "mlops-app")
 
     return client.get_secrets(path=path)
-
-
-vault_secrets = load_vault_secrets()
 
 
 class MissingSettingError(RuntimeError):
@@ -57,11 +58,13 @@ class CassandraSettings:
 def cassandra_settings() -> CassandraSettings:
     """Настройки подключения к БД из секретов Vault."""
 
-    hosts = vault_secrets["CASSANDRA_HOSTS"].split(",")
-    port = int(vault_secrets["CASSANDRA_PORT"])
-    keyspace = vault_secrets["CASSANDRA_KEYSPACE"]
-    username = vault_secrets["CASSANDRA_USER"]
-    password = vault_secrets["CASSANDRA_PASSWORD"]
+    secrets = load_vault_secrets()
+
+    hosts = secrets["CASSANDRA_HOSTS"].split(",")
+    port = int(secrets["CASSANDRA_PORT"])
+    keyspace = secrets["CASSANDRA_KEYSPACE"]
+    username = secrets["CASSANDRA_USER"]
+    password = secrets["CASSANDRA_PASSWORD"]
 
     return CassandraSettings(
         hosts=hosts,

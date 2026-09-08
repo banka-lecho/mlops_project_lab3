@@ -1,3 +1,3 @@
-path "secret/data/mlops-project" {
+path "secret/data/mlops-app" {
   capabilities = ["read"]
 }
