@@ -37,3 +37,5 @@ vault/config/
 
 # secrets
 vault/seed.sh
+vault/vault.env
+!vault/vault.env.example
