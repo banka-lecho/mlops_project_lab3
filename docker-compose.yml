@@ -87,9 +87,9 @@ services:
       context: .
       dockerfile: Dockerfile
 
-    image: ${API_IMAGE:-emotion-prediction-api:local}
+    image: ${API_IMAGE:-big-data-lab3:local}
 
-    container_name: emotion-prediction-api
+    container_name: big-data-lab3-api
 
     ports:
       - "${API_PORT}:8000"
