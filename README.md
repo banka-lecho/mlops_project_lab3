@@ -56,7 +56,7 @@ Pull the dataset and the trained checkpoint (see [DVC](#10-dvc) for remote setup
 dvc pull
 ```
 
-`config.ini` is the single source of truth for filesystem paths (data and model checkpoint); secrets and the database address come only from environment variables. See [`src/config.py`](src/config.py):
+`config.ini` is the single source of truth for filesystem paths (data and model checkpoint); database credentials and connection settings come from a **HashiCorp Vault** container, never from `config.ini` or the source tree. See [`src/config.py`](src/config.py):
 
 ```ini
 [DATA]
@@ -70,30 +70,40 @@ device = cpu
 
 ### Secrets and connection settings
 
-No credentials, database host/port or access tokens are stored in the source code. Everything sensitive comes from **environment variables**; `config.ini` holds only non-sensitive paths.
+No database credentials or connection settings live in the source tree. They are stored in a dedicated **HashiCorp Vault** service (third container in [`docker-compose.yml`](docker-compose.yml)) and read at runtime; `config.ini` holds only non-sensitive paths, and there are **no secret-bearing config files to copy** before startup.
 
-```bash
-cp .env.example .env      # then fill in the values
-```
+**Where the secrets live.** [`vault/Dockerfile`](vault/Dockerfile) bakes an init script into the image at build time; on start [`vault/entrypoint.sh`](vault/entrypoint.sh) launches a dev Vault (`VAULT_TOKEN=root`, hardcoded) and applies [`vault/seed.sh`](vault/seed.sh), which writes the KV‑v2 secret `secret/mlops-app`:
 
-[`.env.example`](.env.example) is the committed template; `.env` itself is gitignored (and excluded from the Docker image via `.dockerignore`), so real values never reach the repository.
+| Key | Meaning |
+| --- | --- |
+| `CASSANDRA_HOSTS` | Comma-separated hosts (`cassandra` — the compose service name) |
+| `CASSANDRA_PORT` | CQL port |
+| `CASSANDRA_KEYSPACE` | Keyspace name (`dog_emotion_keyspace`, see [`schema.cql`](src/db/schema.cql)) |
+| `CASSANDRA_USER` / `CASSANDRA_PASSWORD` | Unprivileged app role the API uses (`SELECT` + `MODIFY` on the keyspace) |
+| `CASSANDRA_BOOTSTRAP_USER` / `CASSANDRA_BOOTSTRAP_PASSWORD` | Cassandra superuser, used only by [`init_db.sh`](src/db/init_db.sh) to apply the schema and create the app role |
+
+`vault/seed.sh` and `vault/vault.env` are **gitignored** (only `*.example` templates are committed). CI/CD regenerates them from the templates plus a GitHub Secret — see [CI/CD](#9-cicd).
+
+**How the service reads them.**
+
+- [`src/vault.py`](src/vault.py) — `VaultClient` (the `hvac` library) authenticates with `VAULT_ADDR` + `VAULT_TOKEN` and reads `secret/mlops-app`.
+- [`src/config.py`](src/config.py) — `load_vault_secrets()` fetches the secret **lazily on the first DB access** (not at import, so unit tests need no Vault) and caches it. `cassandra_settings()` builds `CassandraSettings` from the Vault response; the password is excluded from `__repr__`, so it cannot leak into logs or tracebacks.
+- [`src/db/cassandra_client.py`](src/db/cassandra_client.py) — passes those settings to `PlainTextAuthProvider`; the API connects as the unprivileged `emotion_app` role.
+- [`src/db/init_db.sh`](src/db/init_db.sh) and the Cassandra healthcheck read the same secret via [`vault/load_secrets.py`](vault/load_secrets.py) (`export`s the KV values).
+
+**Non-secret env vars** still come from [`.env`](.env.example) (`env_file:` in compose), which contains no credentials:
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
-| `CASSANDRA_HOSTS` | yes | Comma-separated hosts. `cassandra` (compose service name) for `docker compose`, `127.0.0.1` when the API runs on the host |
-| `CASSANDRA_PORT` | yes | CQL port |
-| `CASSANDRA_KEYSPACE` | yes | Keyspace name (`dog_emotion_keyspace` in [`schema.cql`](src/db/schema.cql)) |
-| `CASSANDRA_USER` | yes | Database login |
-| `CASSANDRA_PASSWORD` | yes | Database password |
-| `CASSANDRA_CONNECT_RETRIES` / `CASSANDRA_RETRY_DELAY` | no | Connection retry tuning |
 | `API_PORT` | yes (compose) | Host port the API is published on |
+| `CASSANDRA_CONNECT_RETRIES` / `CASSANDRA_RETRY_DELAY` | no | Connection retry tuning (read by `cassandra_settings()`) |
 
-[`src/config.py`](src/config.py) loads `.env` via `python-dotenv` (real environment variables win over the file) and raises `MissingSettingError` if a required variable is absent — there is no fallback default for a login, a password or a host. The password is excluded from `CassandraSettings.__repr__`, so it cannot leak into logs or tracebacks.
+`cp .env.example .env` is enough; there are no values to fill in.
 
-Running something outside compose, against a local Cassandra:
+**Running outside compose** (Vault + Cassandra reachable on the host):
 
 ```bash
-CASSANDRA_HOSTS=127.0.0.1 python -m src.db.load_dataset
+VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=root python -m src.db.load_dataset
 ```
 
 ## 3. Dataset
